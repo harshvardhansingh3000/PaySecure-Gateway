@@ -1,7 +1,12 @@
 import pool from '../models/db.js';
 import CryptoJS from 'crypto-js';
+import { validationResult } from 'express-validator';
 
 export const addPaymentMethod = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
     const { type, details } = req.body;
     const userId = req.user.userId;
 
@@ -58,6 +63,10 @@ export const removePaymentMethod = async (req, res) => {
 };
 
 export const initiatePayment = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
     const userId = req.user.userId;
     const { paymentMethodId, amount, description } = req.body;
     try{
@@ -71,10 +80,20 @@ export const initiatePayment = async (req, res) => {
     }
     // Simulate payment processing (in real world, integrate with payment processor)
 
-    const random = Math.random();
-    let status = 'success';
-    if (random < 0.2) { // 20% chance to fail
-    status = 'failed';
+    let status = 'pending';
+    let failureReason = null;
+
+    // Example simulation logic
+    if (amount > 10000) {
+      status = 'failed';
+      failureReason = 'Amount exceeds transaction limit';
+    } else if (Math.random() < 0.1) {
+      status = 'failed';
+      failureReason = 'Network error';
+    } else if (Math.random() < 0.2) {
+      status = 'pending';
+    } else {
+      status = 'success';
     }
 
     // Record transaction
@@ -84,10 +103,58 @@ export const initiatePayment = async (req, res) => {
     );
 
     res.status(201).json({
-      message: 'Payment processed',
-      transaction: txResult.rows[0]
+      message: status === 'success' ? 'Payment processed successfully' : 'Payment not successful',
+      transaction: { ...txResult.rows[0], failureReason }
     });
-    }catch(error){
-        res.status(500).json({ message: 'Server error', error: error.message });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const getTransactionHistory = async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const result = await pool.query(
+      `SELECT t.id, t.amount, t.status, t.description, t.created_at, 
+              pm.type AS payment_method_type
+         FROM transactions t
+         LEFT JOIN payment_methods pm ON t.payment_method_id = pm.id
+         WHERE t.user_id = $1
+         ORDER BY t.created_at DESC`,
+      [userId]
+    );
+    res.json({ transactions: result.rows });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
+export const refundPayment = async (req, res) => {
+  const userId = req.user.userId;
+  const { transactionId } = req.params;
+
+  try {
+    // Find transaction and check ownership/status
+    const txResult = await pool.query(
+      'SELECT * FROM transactions WHERE id = $1 AND user_id = $2',
+      [transactionId, userId]
+    );
+    if (txResult.rowCount === 0) {
+      return res.status(404).json({ message: 'Transaction not found or not authorized' });
     }
+    const transaction = txResult.rows[0];
+    if (transaction.status !== 'success') {
+      return res.status(400).json({ message: 'Only successful transactions can be refunded' });
+    }
+
+    // Simulate refund (update status)
+    await pool.query(
+      'UPDATE transactions SET status = $1 WHERE id = $2',
+      ['refunded', transactionId]
+    );
+
+    res.json({ message: 'Refund processed', transactionId });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
 };

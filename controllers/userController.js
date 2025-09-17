@@ -1,8 +1,13 @@
 import pool from '../models/db.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { validationResult } from 'express-validator';
 
 export const loginUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
   const { email, password } = req.body;
   try {
     // Find user by email
@@ -20,7 +25,7 @@ export const loginUser = async (req, res) => {
 
     // Generate JWT
     const token = jwt.sign(
-      { userId: user.id, email: user.email },//payload
+      { userId: user.id, email: user.email, role: user.role },//payload
       process.env.JWT_SECRET,
       { expiresIn: '1h' }// options
     );
@@ -36,6 +41,10 @@ export const loginUser = async (req, res) => {
 };
 
 export const registerUser = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
   const { name, email, password } = req.body;
   try {
     const saltRounds = 10;
